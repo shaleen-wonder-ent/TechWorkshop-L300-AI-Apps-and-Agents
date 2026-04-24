@@ -57,4 +57,4 @@ out/
 parameters.json
 .azure
 
-.claude/
+.claude/azcred.json
