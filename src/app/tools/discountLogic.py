@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from openai import AzureOpenAI
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential, get_bearer_token_provider
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -9,11 +9,12 @@ from opentelemetry import trace
 from azure.monitor.opentelemetry import configure_azure_monitor
 from azure.ai.agents.telemetry import trace_function
 import time
-# from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
+from opentelemetry.instrumentation.openai_v2 import OpenAIInstrumentor
 
 # Enable Azure Monitor tracing
 application_insights_connection_string = os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"]
-# configure_azure_monitor(connection_string=application_insights_connection_string)
+configure_azure_monitor(connection_string=application_insights_connection_string)
+OpenAIInstrumentor().instrument()
 # OpenAIInstrumentor().instrument()
 
 # scenario = os.path.basename(__file__)
@@ -23,7 +24,10 @@ application_insights_connection_string = os.environ["APPLICATIONINSIGHTS_CONNECT
 endpoint = os.getenv("gpt_endpoint")
 deployment = os.getenv("gpt_deployment")
 api_version = os.getenv("gpt_api_version")
-credential = DefaultAzureCredential()
+credential = ChainedTokenCredential(
+    ManagedIdentityCredential(),
+    AzureCliCredential(tenant_id=os.environ.get('AZURE_TENANT_ID'), process_timeout=60),
+)
 token_provider = get_bearer_token_provider(credential, "https://cognitiveservices.azure.com/.default")
 
 current_dir = os.path.dirname(os.path.abspath(__file__))

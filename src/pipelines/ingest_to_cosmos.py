@@ -5,7 +5,7 @@ from typing import Any
 import requests
 
 from azure.cosmos import CosmosClient, PartitionKey
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 
 
@@ -20,7 +20,7 @@ EMBEDDING_ENDPOINT = os.environ.get("embedding_endpoint")
 EMBEDDING_DEPLOYMENT = os.environ.get("embedding_deployment")
 EMBEDDING_API_VERSION = os.environ.get("embedding_api_version")
 
-credential = DefaultAzureCredential()
+credential = AzureCliCredential(tenant_id=os.environ.get("AZURE_TENANT_ID"))
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.WARNING)
@@ -67,10 +67,24 @@ def get_request_embedding(text: str) -> list[float] | None:
         return None
 
     url = EMBEDDING_ENDPOINT.rstrip("/") + f"/openai/deployments/{EMBEDDING_DEPLOYMENT}/embeddings?api-version={EMBEDDING_API_VERSION}"
-    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    global _cached_embed_token
+    try:
+        _cached_embed_token  # type: ignore[name-defined]
+    except NameError:
+        _cached_embed_token = None  # type: ignore[assignment]
+    import time as _time
+    if _cached_embed_token is None or _cached_embed_token.expires_on - _time.time() < 300:
+        for _attempt in range(5):
+            try:
+                _cached_embed_token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                break
+            except Exception:
+                _time.sleep(2 * (_attempt + 1))
+        else:
+            return None
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {token.token}",
+        "Authorization": f"Bearer {_cached_embed_token.token}",
     }
     payload = {"input": text}
 
@@ -92,8 +106,31 @@ def main() -> None:
         raise ValueError("CONTAINER_NAME must be provided in environment variables")
 
     database = client.create_database_if_not_exists(id=DATABASE_NAME)
+    vector_embedding_policy = {
+        "vectorEmbeddings": [
+            {
+                "path": "/request_vector",
+                "dataType": "float32",
+                "distanceFunction": "cosine",
+                "dimensions": 3072,
+            }
+        ]
+    }
+    indexing_policy = {
+        "indexingMode": "consistent",
+        "automatic": True,
+        "includedPaths": [{"path": "/*"}],
+        "excludedPaths": [
+            {"path": "/\"_etag\"/?"},
+            {"path": "/request_vector/*"},
+        ],
+        "vectorIndexes": [{"path": "/request_vector", "type": "diskANN"}],
+    }
     container = database.create_container_if_not_exists(
-        id=CONTAINER_NAME, partition_key=PartitionKey(path="/ProductID")
+        id=CONTAINER_NAME,
+        partition_key=PartitionKey(path="/ProductID"),
+        vector_embedding_policy=vector_embedding_policy,
+        indexing_policy=indexing_policy,
     )
 
     items = load_json_items(JSON_FILE)

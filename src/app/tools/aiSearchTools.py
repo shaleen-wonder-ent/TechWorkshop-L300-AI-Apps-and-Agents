@@ -2,7 +2,7 @@ import os
 import sys
 import requests
 from azure.cosmos import CosmosClient
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
@@ -18,7 +18,10 @@ EMBEDDING_ENDPOINT = os.environ.get("embedding_endpoint")
 EMBEDDING_DEPLOYMENT = os.environ.get("embedding_deployment")
 EMBEDDING_API_VERSION = os.environ.get("embedding_api_version")
 
-credential = DefaultAzureCredential()
+credential = ChainedTokenCredential(
+    ManagedIdentityCredential(),
+    AzureCliCredential(tenant_id=os.environ.get('AZURE_TENANT_ID'), process_timeout=60),
+)
 
 # Validate required Cosmos env vars
 if not COSMOS_ENDPOINT:
